@@ -13,22 +13,22 @@ import subprocess
 import sys
 import os
 from urllib.parse import urlparse
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 
 
 
 # AIRTABLE_API_KEY = "pat2WsZZK3mMRPkua.51d5ffef9db33b0b866b55870f74343ae70d132f2481f1af2de5456b5622bd50"
-# AIRTABLE_BASE_ID = "app79G4gcDC3l2f4g"
+# AIRTABLE_BASE_ID = "appf8fE9YXD973c5O"
 # AIRTABLE_TABLE_NAME = "test"
-# AIRTABLE_TABLE_ID = "tblrJX2sHD7sqxqAK"  
+# AIRTABLE_TABLE_ID = "tblLu03udJ2S5fptj"  
 # AIRTABLE_VIEW_ID  = "viwbkhw7LOv03ehw6"
 # AIRTABLE_LISTING_FIELD = "ListingURL" 
 # VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".m3u8", ".ts"}
 # M3U_TYPES = {"application/vnd.apple.mpegurl", "application/x-mpegurl"}
 
 AIRTABLE_API_KEY = "pat2WsZZK3mMRPkua.51d5ffef9db33b0b866b55870f74343ae70d132f2481f1af2de5456b5622bd50"
-AIRTABLE_BASE_ID = "app79G4gcDC3l2f4g"
+AIRTABLE_BASE_ID = "appf8fE9YXD973c5O"
 AIRTABLE_TABLE_NAME = "Property Listing"
 AIRTABLE_TABLE_ID = "tblLu03udJ2S5fptj"  
 # AIRTABLE_VIEW_ID  = "viwegaYlquPC7KgS5"  # This view doesn't exist
@@ -70,29 +70,41 @@ def iter_listing_urls_from_airtable(limit=None):
     #     ")"
     # )
     
-    # Process ALL records that have a ListingURL (removed Developer/Type restrictions)
-    formula = "NOT({ListingURL} = BLANK())"
-
+    # Process records that have a ListingURL AND no Gallery images (to avoid re-processing)
+    formula = "AND(NOT({ListingURL} = BLANK()), {Gallery} = BLANK())"
 
     params = {
         # "view": AIRTABLE_VIEW_ID,  # Removed - view doesn't exist
         "pageSize": 100,
         "filterByFormula": formula,
         # You can request only needed fields; ListingURL is enough here
-        "fields[]": [AIRTABLE_LISTING_FIELD],
+        "fields[]": AIRTABLE_LISTING_FIELD,
     }
 
     offset = None
     count = 0
+    page_count = 0
+    
+    print(f"[DEBUG] Starting to fetch records with formula: {formula}")
+    print(f"[DEBUG] This will only process records that have ListingURL but NO Gallery images")
+    
     while True:
+        page_count += 1
         if offset:
             params["offset"] = offset
+            print(f"[DEBUG] Fetching page {page_count} with offset: {offset}")
+        else:
+            print(f"[DEBUG] Fetching page {page_count} (first page)")
+            
         resp = requests.get(base, headers=headers, params=params, timeout=30)
         if resp.status_code != 200:
             print(f"[ERROR] Failed to fetch listing URLs: {resp.status_code} {resp.text}")
             break
 
         payload = resp.json()
+        records_in_page = len(payload.get("records", []))
+        print(f"[DEBUG] Page {page_count}: Found {records_in_page} records")
+        
         for rec in payload.get("records", []):
             fields = rec.get("fields", {})
             url = (fields.get(AIRTABLE_LISTING_FIELD) or "").strip()
@@ -101,10 +113,15 @@ def iter_listing_urls_from_airtable(limit=None):
                 yield rec_id, url
                 count += 1
                 if limit is not None and count >= limit:
+                    print(f"[DEBUG] Reached limit of {limit}, stopping")
                     return
 
         offset = payload.get("offset")
+        print(f"[DEBUG] Page {page_count} complete. Total records processed so far: {count}")
+        print(f"[DEBUG] Next offset: {offset}")
+        
         if not offset:
+            print(f"[DEBUG] No more pages. Total records processed: {count}")
             break
 
 def is_downloadable_video(url: str) -> bool:
@@ -824,11 +841,60 @@ def _wait_for_real_src(driver, img, timeout=10):
         )
     )
 
+def test_airtable_connection():
+    """Test function to check how many records are available in Airtable (with ListingURL but no Gallery)"""
+    print("🔍 Testing Airtable connection and counting records...")
+    print("🔍 Looking for records with ListingURL but NO Gallery images...")
+    
+    base = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}"
+    headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+    formula = "AND(NOT({ListingURL} = BLANK()), {Gallery} = BLANK())"
+    
+    params = {
+        "pageSize": 100,
+        "filterByFormula": formula,
+        "fields[]": AIRTABLE_LISTING_FIELD,
+    }
+    
+    total_count = 0
+    page_count = 0
+    offset = None
+    
+    while True:
+        page_count += 1
+        if offset:
+            params["offset"] = offset
+            
+        resp = requests.get(base, headers=headers, params=params, timeout=30)
+        if resp.status_code != 200:
+            print(f"[ERROR] Failed to fetch records: {resp.status_code} {resp.text}")
+            break
+            
+        payload = resp.json()
+        records_in_page = len(payload.get("records", []))
+        total_count += records_in_page
+        
+        print(f"[TEST] Page {page_count}: {records_in_page} records (Total so far: {total_count})")
+        
+        offset = payload.get("offset")
+        if not offset:
+            break
+    
+    print(f"[TEST] Total records with ListingURL but NO Gallery: {total_count}")
+    return total_count
+
 def main():
-    print("here 2")
+    print("🔍 Full Details Scraper")
+    print("📋 Processing records that have ListingURL but NO Gallery images")
+    
+    # First, test the connection and count records
+    total_available = test_airtable_connection()
+    
     start_from = 0
     count = 0
     processed = 0
+
+    print(f"\n🚀 Starting to process {total_available} records (those without Gallery images)...")
 
     for rec_id, listing_url in iter_listing_urls_from_airtable(limit=None):
         count += 1
@@ -836,7 +902,7 @@ def main():
             continue
 
         try:
-            print(f"\n▶️  Processing {count}: {listing_url} (Record ID: {rec_id})")
+            print(f"\n▶️  Processing {count}/{total_available}: {listing_url} (Record ID: {rec_id})")
             run_scraper(listing_url, rec_id)
             processed += 1
             time.sleep(2.0)
@@ -845,8 +911,24 @@ def main():
             print(f"[ERROR] while processing {listing_url}: {e}")
 
     print(f"\n✅ Scraper ran {processed} time(s), starting from record #{start_from}.")
+    print(f"📊 Expected: {total_available} records, Processed: {processed} records")
+
+def test_pagination_only():
+    """Test just the pagination to see how many records we get"""
+    print("🧪 Testing pagination only...")
+    count = 0
+    for rec_id, listing_url in iter_listing_urls_from_airtable(limit=None):
+        count += 1
+        if count <= 5:  # Show first 5 for debugging
+            print(f"  {count}: {listing_url}")
+        elif count % 50 == 0:  # Show every 50th record
+            print(f"  ... {count} records processed so far")
+    
+    print(f"🧪 Total records found: {count}")
 
 if __name__ == "__main__":
+    # Uncomment the line below to test pagination only
+    # test_pagination_only()
     main()
 
 
