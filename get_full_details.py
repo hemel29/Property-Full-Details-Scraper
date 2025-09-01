@@ -19,9 +19,9 @@ from selenium.common.exceptions import TimeoutException
 
 
 # AIRTABLE_API_KEY = "pat2WsZZK3mMRPkua.51d5ffef9db33b0b866b55870f74343ae70d132f2481f1af2de5456b5622bd50"
-# AIRTABLE_BASE_ID = "app79G4gcDC3l2f4g"
+# AIRTABLE_BASE_ID = "appf8fE9YXD973c5O"
 # AIRTABLE_TABLE_NAME = "test"
-# AIRTABLE_TABLE_ID = "tblrJX2sHD7sqxqAK"  
+# AIRTABLE_TABLE_ID = "tblLu03udJ2S5fptj"  
 # AIRTABLE_VIEW_ID  = "viwbkhw7LOv03ehw6"
 # AIRTABLE_LISTING_FIELD = "ListingURL" 
 # VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".m3u8", ".ts"}
@@ -1117,4 +1117,5 @@ if __name__ == "__main__":
 #         print(f"[INFO] Video extraction error: {e}")
 
 #     return urls
+
 
