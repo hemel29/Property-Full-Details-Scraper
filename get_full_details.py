@@ -19,9 +19,9 @@ from selenium.common.exceptions import TimeoutException
 
 
 # AIRTABLE_API_KEY = "pat2WsZZK3mMRPkua.51d5ffef9db33b0b866b55870f74343ae70d132f2481f1af2de5456b5622bd50"
-# AIRTABLE_BASE_ID = "appf8fE9YXD973c5O"
+# AIRTABLE_BASE_ID = "app79G4gcDC3l2f4g"
 # AIRTABLE_TABLE_NAME = "test"
-# AIRTABLE_TABLE_ID = "tblLu03udJ2S5fptj"  
+# AIRTABLE_TABLE_ID = "tblrJX2sHD7sqxqAK"  
 # AIRTABLE_VIEW_ID  = "viwbkhw7LOv03ehw6"
 # AIRTABLE_LISTING_FIELD = "ListingURL" 
 # VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".m3u8", ".ts"}
@@ -150,7 +150,7 @@ def wait_for_all_videos(driver, timeout=15):
             break  # no new buttons loaded
     return driver.find_elements(By.CSS_SELECTOR, ".img-box .LinkBtn .VideoBtn")
 
-def extract_video_urls(driver, load_timeout=20, settle_wait=0.5):
+def extract_video_urls(driver, load_timeout=10, settle_wait=0.2):
     """
     Scrape video URLs from sections matching:
       virtual-wrap -> virtual-box -> img-box -> LinkBtn -> VideoBtn
@@ -162,9 +162,9 @@ def extract_video_urls(driver, load_timeout=20, settle_wait=0.5):
         # Nudge lazy-loaders
         for y in (200, 800, 1600, 2400):
             driver.execute_script("window.scrollTo(0, arguments[0]);", y)
-            time.sleep(0.2)
+            time.sleep(0.1)  # Reduced from 0.2 seconds
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(0.3)
+        time.sleep(0.2)  # Reduced from 0.3 seconds
 
     def safe_click(el):
         try:
@@ -255,7 +255,7 @@ def extract_video_urls(driver, load_timeout=20, settle_wait=0.5):
         main = driver.current_window_handle
 
         # Ensure page is hydrated a bit before counting buttons
-        time.sleep(1.0)
+        time.sleep(0.5)  # Reduced from 1.0 seconds
         slow_scroll()
 
         buttons = wait_all_video_buttons()
@@ -339,7 +339,7 @@ def extract_description_content(driver):
     image_urls = []
 
     try:
-        WebDriverWait(driver, 30).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".description-box .descriptionDiv"))
         )
         description_div = driver.find_element(By.CSS_SELECTOR, ".description-box .descriptionDiv")
@@ -444,8 +444,8 @@ def extract_gallery_images(driver):
         last_seen_count = 0
         stagnant_passes = 0
         MAX_STAGNANT = 5           # allow more time before giving up
-        SETTLE_SEC = 0.8           # time to let images load after each scroll
-        MAX_PASSES = 60            # more passes for slow loading
+        SETTLE_SEC = 0.3           # time to let images load after each scroll (reduced from 0.8)
+        MAX_PASSES = 30            # fewer passes for faster processing (reduced from 60)
 
         def collect_now():
             """Collect any newly rendered <img> urls from this img_box."""
@@ -590,7 +590,7 @@ def extract_floor_plan_images(driver):
         stagnant = 0
 
         # vertical scroll to force load
-        for _ in range(40):
+        for _ in range(20):  # Reduced from 40 iterations
             imgs = plans.find_elements(By.TAG_NAME, "img")
             for img in imgs:
                 try:
@@ -621,11 +621,11 @@ def extract_floor_plan_images(driver):
 
             # scroll one viewport down inside the plans container (or page fallback)
             driver.execute_script("arguments[0].scrollTop += Math.max(400, arguments[0].clientHeight);", plans)
-            time.sleep(0.3)
+            time.sleep(0.1)  # Reduced from 0.3 seconds
 
             # if container doesn't scroll, nudge the page
             driver.execute_script("window.scrollBy(0, 400);")
-            time.sleep(0.2)
+            time.sleep(0.1)  # Reduced from 0.2 seconds
 
     except Exception as e:
         print(f"[INFO] Floor plans section not found or empty: {e}")
@@ -715,26 +715,70 @@ def run_scraper(URL, record_id):
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-web-security")
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+    chrome_options.add_argument("--disable-renderer-backgrounding")
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--aggressive-cache-discard")
+    chrome_options.add_argument("--memory-pressure-off")
 
     driver = webdriver.Chrome(options=chrome_options)
 
     try:
         print(f"[INFO] Navigating to {URL}")
+        start_time = time.time()
         driver.get(URL)
-        time.sleep(30)
+        
+        # Wait for page to load with a reasonable timeout instead of fixed sleep
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            print(f"[INFO] Page loaded in {time.time() - start_time:.2f} seconds")
+        except TimeoutException:
+            print("[WARNING] Page load timeout, continuing anyway")
+        
+        # Quick scroll to trigger any lazy loading, but don't wait long
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(20)
+        time.sleep(2)  # Reduced from 20 seconds to 2 seconds
 
         record = {}
+        
+        # Track extraction times for performance monitoring
+        extraction_start = time.time()
+        
+        print("[INFO] Extracting project info...")
         project_info = extract_project_info(driver)
+        
+        print("[INFO] Extracting description...")
         description = extract_description_content(driver)
+        
+        print("[INFO] Extracting site plan...")
         site_plan = extract_site_plan(driver)
+        
+        print("[INFO] Extracting elevation chart...")
         elevation_chart_url = extract_elevation_chart(driver)
+        
+        print("[INFO] Extracting gallery images...")
         gallery_urls = extract_gallery_images(driver)
+        
+        print("[INFO] Extracting virtual tour links...")
         virtual_links = extract_virtual_tour_links(driver)
+        
+        print("[INFO] Extracting floor plan images...")
         floor_plan_urls = extract_floor_plan_images(driver)
+        
+        print("[INFO] Extracting video URLs...")
         video_urls = extract_video_urls(driver)      
-        asset_urls = filter_video_assets(video_urls) 
+        asset_urls = filter_video_assets(video_urls)
+        
+        extraction_time = time.time() - extraction_start
+        print(f"[INFO] Data extraction completed in {extraction_time:.2f} seconds") 
 
         record.update(project_info)
         record["Description"] = description["text"] or "No description available"
@@ -756,7 +800,13 @@ def run_scraper(URL, record_id):
         print("\n[DATA EXTRACTED]")
         print(json.dumps(record, indent=2))
 
+        upload_start = time.time()
         upload_to_airtable(record, record_id)
+        upload_time = time.time() - upload_start
+        
+        total_time = time.time() - start_time
+        print(f"[INFO] Total processing time: {total_time:.2f} seconds")
+        print(f"[INFO] Upload time: {upload_time:.2f} seconds")
 
     finally:
         driver.quit()
@@ -1117,5 +1167,3 @@ if __name__ == "__main__":
 #         print(f"[INFO] Video extraction error: {e}")
 
 #     return urls
-
-
